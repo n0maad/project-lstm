@@ -9,6 +9,9 @@
         Step 5: Instantiate Loss Class
         Step 6: Instantiate Optimiser Class
         Step 7: Train Model
+
+
+        #requires_grad_() is a function that saves all gradients into a tensor for later use/pre processing?
 '''
 
 import torch
@@ -20,12 +23,153 @@ import torchvision.datasets as datasets
 from torch.utils.data import DataLoader
 from torch.utils.data import TensorDataset
 
+# Allocating GPU if available
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
 # Step 1: Load Dataset
 train_dataset = datasets.MNIST(root='./data', train = True, transform = tranforms.ToTensor(), download = True)
-test_datasets   = datasets.MNIST(root='./data', train = False, transform = transforms.ToTensor())
+test_dataset  = datasets.MNIST(root='./data', train = False, transform = tranforms.ToTensor())
 
-#Step 2: Make Dataset iterable
-batch_size = 100
-n_iters = 3000
+# Step 2: Make Dataset iterable
+batch_size = 100                                                # number of samples per batch.
+n_iters = 3000                                                  # number of times to cycle through each batch.
+num_epochs = int(n_iters / (len(train_dataset)/batch_size))     # number of cycles through the entire dataset.
 
-num_epochs = n_iters / (len(train_dataset) / )
+train_loader = DataLoader(train_dataset, batch_size, shuffle = True)
+test_loader  = DataLoader(test_dataset, batch_size)
+
+# Step 3: Create Model Class
+class LSTM(nn.Module):
+    def __init__(self, input_size, hidden_dim, layer_dim, output_size, bidir):
+        super(LSTM, self).__init__()
+
+        # Number of neurons in the hidden layer
+        self.hidden_dim = hidden_dim
+
+        # Number of hidden layers
+        self.layer_dim = layer_dim
+
+        # Determine if the LSTM is bidirectional
+        self.bidir = bidir
+    
+        # Generates the LSTM aspect to the model
+        self.lstm = nn.LSTM(input_size, hidden_dim, layer_dim, batch_first = True, bidirectional=self.bidir)      # batch_first = True makes the output a tensor(batch, seq(*), feature)
+        
+        # Calculations performed in each layer
+        if self.bidirectional:
+            self.fc = nn.Linear(hidden_dim*2, output_size)
+        else: self.fc = nn.Linear(hidden_dim, output_size)
+
+    def forward(self, x):
+        
+        if self.bidirectional:
+            # Initialise the hidden states with zeroes and saves them in a tensor.
+            h0 = torch.zeros(self.layer_dim*2, x.size(0), self.hidden_dim).requires_grad_().to(device)
+            # Initialise cell states
+            c0 = torch.zeros(self.layer_dim*2, x.size(0), self.hidden_dim).requires_grad_().to(device)
+        else:
+            # Initialise the hidden states with zeroes and saves them in a tensor.
+            h0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim).requires_grad_().to(device)
+            # Initialise cell states
+            c0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim).requires_grad_().to(device)
+        # Generate output, hidden and cell states
+        out, (hn, cn) = self.lstm(x, (h0.detach(), c0.detach()))       # detach is required to ensure BPTT is done only in the current batch and not all batches.
+        return self.fc(out[:,-1,:])                                    # only inputs the final layer of elements.
+
+    # Initialise weights
+    def init_weights():
+        return 0
+
+    # Initialise hidden states
+    def init_hidden():
+        return 0
+# Step 4: Instantiate Model Class
+
+# hyper-parameters
+input_size  = 28                # number of expected features in the input
+hidden_dim  = 100               # number of features in the hidden state
+layer_dim   = 2                 # number of recurrent layers
+output_size = 10                # number of classes (for classification)
+seq_dim = 28                    # Sequence length - How many inputs are viewed at once?
+learning_rate = 0.1 
+
+# instantiate model
+model = LSTM(input_size, hidden_dim, layer_dim, output_size, True).to(device)
+
+# Step 5: Instantiate Loss Class
+criterion = nn.CrossEntropyLoss()
+
+# Step 6: Instantiate Optimiser Class
+optimiser = torch.optim.SGD(model.parameters(), learning_rate)
+
+
+def parameter_analysis():
+    print('Number of Model Parameters = ', len(list(model.parameters()))) 
+    print(model.parameters().data)
+    for i in range(len(list(model.parameters()))):
+        print(list(model.parameters())[i].size())
+    '''
+        model.parameters()[0] = input ---> gates: weights
+        model.parameters()[1] = input ---> gates: bias
+                          [2] = hidden state ---> gates: weights
+                          [3] = hidden state ---> gates: bias
+                          [4] = hidden state ---> output: weights
+                          [5] = hidden state ---> output: bias
+    '''
+
+# Step 7: Train Model
+iter = 0
+for epoch in range(num_epochs):
+    for i, (images, labels) in enumerate(train_loader):
+        # Load images as Variable
+        # Changes dimension of tensor
+        images = images.view(-1, seq_dim, input_size).requires_grad_().cuda()   # returns a new tensor of different shape.
+                                                                                # -1 = any value that will fit with the other values.
+                                                                                # seq_dim = row segmentation.
+                                                                                # input_size = coloums (feature) segmentation. 
+        labels = labels.cuda()
+
+        # Clear gradients w.r.t. parameters
+        optimiser.zero_grad()
+
+        # Forward pass to get output/logits
+        # outputs.size() --> 100, 10
+        outputs = model(images)
+
+        # Calculate Loss: softmax --> cross entropy loss
+        loss = criterion(outputs, labels)
+
+        # Getting gradients w.r.t. parameters
+        loss.backward()
+
+        # Updating parameters
+        optimiser.step()
+
+        iter += 1
+
+        if iter % 500 == 0:
+            # Calculate Accuracy         
+            correct = 0
+            total = 0
+            # Iterate through test dataset
+            for images, labels in test_loader:
+                # Load images as Variable
+                images = images.view(-1, seq_dim, input_size).cuda()
+                labels = labels.cuda()
+
+                # Forward pass only to get logits/output
+                outputs = model(images)
+
+                # Get predictions from the maximum value
+                _, predicted = torch.max(outputs.data, 1)
+
+                # Total number of labels
+                total += labels.size(0)
+
+                # Total correct predictions
+                correct += (predicted == labels).sum()
+
+            accuracy = 100 * correct / total
+
+            # Print Loss
+            print('Epoch: {} | Iteration: {} | Loss: {} | Accuracy: {}'.format(epoch, iter, loss.item(), accuracy))
