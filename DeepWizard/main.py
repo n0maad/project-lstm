@@ -115,10 +115,10 @@ class LSTM(nn.Module):
                                                                                     # ??hidden_dim are used because nn.Linear(in_features) refers to the size of each input sample for each layer not just the input layer.
     def forward(self, x):
         # Initialise hidden states with zeroes
-        h0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim).requires_grad_()
+        h0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim).requires_grad_().cuda()
 
         # Initialise the cell state
-        c0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim).requires_grad_()
+        c0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim).requires_grad_().cuda()
 
         
         out, (hn, cn) = self.lstm(x, (h0.detach(), c0.detach()))                    # detach() ensures the gradient is not backpropagated.
@@ -146,10 +146,12 @@ hidden_dim  = 100
 layer_dim   = 1         # no. of hidden layers
 output_dim  = 10
 
-lstm_model = LSTM(input_dim, hidden_dim, layer_dim, output_dim)
+lstm_model = LSTM(input_dim, hidden_dim, layer_dim, output_dim).cuda()
 
 # Step 5 - Instantiate Loss Class (Classification Problem)
 # Given an input and a target, a criterion computes a gradient according to a given loss function
+# Objective function/criterion is to alter certain values/parameters to either maximise or minimise said values/parameters
+# Loss/Cost/Error function is applied when minimising values/parameters.
 criterion = nn.CrossEntropyLoss()   
 
 # Step 6 - Instantiate Optimizer Class
