@@ -74,6 +74,11 @@ class LSTM(nn.Module):
             c0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim).requires_grad_().to(device)
         # Generate output, hidden and cell states
         out, (hn, cn) = self.lstm(x, (h0.detach(), c0.detach()))       # detach is required to ensure BPTT is done only in the current batch and not all batches.
+        ''' LSTM Output
+        # output = (seq_len, batch, num_directions_hidden_size) from the last layer of the lstm
+        # h_n = (num_layers * num_directions, batch, hidden_size) a tensor containing the hidden state for t = seq_len
+        # c_n = (num_layers * num_directions, batch, hidden_size) a tensor containing the cell state for t = seq_len 
+        '''
         return self.fc(out[:,-1,:])                                    # only inputs the final layer of elements.
 
     # Initialise weights
@@ -81,8 +86,24 @@ class LSTM(nn.Module):
         return 0
 
     # Initialise hidden states
-    def init_hidden():
-        return 0
+    def init_hidden(self, batch_size):
+        ''' Initializes hidden state '''
+        # Create two new tensors with sizes n_layers x batch_size x hidden_dim,
+        # initialized to zero, for hidden state and cell state of LSTM
+        weight = next(self.parameters()).data
+        
+        layer_mult = 1
+        if self.bidirectional:
+            layer_mult *= 2
+        
+        if (torch.cuda.is_available()):
+            hidden = (weight.new(self.n_layers * layer_mult, batch_size, self.hidden_dim).zero_().cuda(),
+                  weight.new(self.n_layers * layer_mult, batch_size, self.hidden_dim).zero_().cuda())
+        else:
+            hidden = (weight.new(self.n_layers * layer_mult, batch_size, self.hidden_dim).zero_(),
+                      weight.new(self.n_layers * layer_mult, batch_size, self.hidden_dim).zero_())
+        
+        return hidden
 # Step 4: Instantiate Model Class
 
 # hyper-parameters
